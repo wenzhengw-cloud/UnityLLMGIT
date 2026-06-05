@@ -1,0 +1,15 @@
+{
+  "name": "npc-ai-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.3",
+    "express-rate-limit": "^7.5.0"
+  }
+}
