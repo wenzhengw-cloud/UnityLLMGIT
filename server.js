@@ -46,11 +46,6 @@ app.options("/api/npc-chat", cors(corsOptions));
 
 app.use(express.json({ limit: "32kb" }));
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean);
-
 function isAllowedOrigin(origin) {
   // Postman / curl / Unity Editor 某些情况下可能没有 origin
   if (!origin) return true;
