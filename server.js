@@ -6,70 +6,27 @@ import "dotenv/config";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean);
-
-function isAllowedOrigin(origin) {
-  // curl、PowerShell、部分服务器请求没有 origin，允许
-  if (!origin) return true;
-
-  // 开发阶段允许所有来源
-  if (allowedOrigins.includes("*")) return true;
-
-  // 允许 Unity WebGL Build And Run 的本地地址
-  if (/^http:\/\/localhost:\d+$/.test(origin)) return true;
-  if (/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) return true;
-
-  return allowedOrigins.includes(origin);
-}
-
-const corsOptions = {
-  origin(origin, callback) {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-    } else {
-      console.log("CORS blocked origin:", origin);
-      callback(new Error("Not allowed by CORS: " + origin));
-    }
-  },
+// 开发测试阶段：直接允许所有跨域来源。
+// Unity WebGL 本地 Build And Run 的地址通常是 http://localhost:xxxxx，
+// 如果 CORS 不放行，浏览器会拦截请求。
+app.use(cors({
+  origin: true,
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   optionsSuccessStatus: 204
-};
+}));
 
-app.use(cors(corsOptions));
-
-// 重要：专门处理 /api/npc-chat 的 OPTIONS 预检请求
-app.options("/api/npc-chat", cors(corsOptions));
+// 处理浏览器预检请求
+app.options("/api/npc-chat", cors());
 
 app.use(express.json({ limit: "32kb" }));
 
-function isAllowedOrigin(origin) {
-  // Postman / curl / Unity Editor 某些情况下可能没有 origin
-  if (!origin) return true;
-
-  // 开发环境允许 localhost 任意端口
-  if (process.env.NODE_ENV !== "production") {
-    if (/^https?:\/\/localhost:\d+$/.test(origin)) return true;
-    if (/^https?:\/\/127\.0\.0\.1:\d+$/.test(origin)) return true;
-  }
-
-  return allowedOrigins.includes(origin);
-}
-
-app.use(cors({
-  origin(origin, callback) {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"]
-}));
+// 请求日志，方便在 Render Logs 里观察 Unity 是否真的请求到了后端
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  console.log("Origin:", req.headers.origin || "no origin");
+  next();
+});
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
@@ -78,34 +35,64 @@ const limiter = rateLimit({
   legacyHeaders: false
 });
 
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    message: "NPC AI server is running.",
+    health: "/health",
+    chat: "/api/npc-chat"
+  });
+});
+
 app.get("/health", (req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    time: new Date().toISOString()
+  });
 });
 
 function getNpcSystemPrompt(npcId) {
-  
+  if (npcId === "forest_guide") {
+    return `
+你是一个像素风2D RPG小游戏里的森林向导NPC。
+你的说话风格温和、简洁、略带神秘感。
+你知道森林、路牌、村庄、玩家任务相关的信息。
+不要说自己是AI，不要提到DeepSeek，不要跳出游戏世界观。
+每次回答控制在80字以内。
+`;
+  }
+
   return `
-你是一个大学生心理健康小游戏里的NPC。
-玩家可能会询问一些自己的困惑，请你用温柔而循循善诱的语言回答。
+你是一个2D RPG小游戏里的普通NPC。
+你需要自然地和玩家对话。
 不要说自己是AI，不要提到API或大语言模型。
 回答要简洁，每次控制在80字以内。
 `;
 }
 
 app.post("/api/npc-chat", limiter, async (req, res) => {
+  console.log("收到 NPC 请求：", req.body);
+
   try {
     const { npcId, userMessage, history } = req.body || {};
 
     if (!process.env.DEEPSEEK_API_KEY) {
-      return res.status(500).json({ error: "Server missing DEEPSEEK_API_KEY" });
+      console.error("缺少 DEEPSEEK_API_KEY");
+      return res.status(500).json({
+        error: "Server missing DEEPSEEK_API_KEY"
+      });
     }
 
     if (typeof userMessage !== "string" || userMessage.trim().length === 0) {
-      return res.status(400).json({ error: "userMessage is required" });
+      return res.status(400).json({
+        error: "userMessage is required"
+      });
     }
 
     if (userMessage.length > 300) {
-      return res.status(400).json({ error: "Message too long" });
+      return res.status(400).json({
+        error: "Message too long"
+      });
     }
 
     const safeHistory = Array.isArray(history)
@@ -155,9 +142,12 @@ app.post("/api/npc-chat", limiter, async (req, res) => {
     const rawText = await deepseekResponse.text();
 
     if (!deepseekResponse.ok) {
-      console.error("DeepSeek API error:", rawText);
+      console.error("DeepSeek API error:", deepseekResponse.status, rawText);
+
       return res.status(502).json({
-        error: "DeepSeek API request failed"
+        error: "DeepSeek API request failed",
+        status: deepseekResponse.status,
+        detail: rawText
       });
     }
 
@@ -169,13 +159,15 @@ app.post("/api/npc-chat", limiter, async (req, res) => {
       usage: data.usage || null
     });
   } catch (err) {
-    console.error(err);
+    console.error("Internal server error:", err);
+
     res.status(500).json({
-      error: "Internal server error"
+      error: "Internal server error",
+      detail: String(err?.message || err)
     });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`NPC AI server running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`NPC AI server running on port ${PORT}`);
 });
