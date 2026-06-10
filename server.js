@@ -6,6 +6,44 @@ import "dotenv/config";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  // curl、PowerShell、部分服务器请求没有 origin，允许
+  if (!origin) return true;
+
+  // 开发阶段允许所有来源
+  if (allowedOrigins.includes("*")) return true;
+
+  // 允许 Unity WebGL Build And Run 的本地地址
+  if (/^http:\/\/localhost:\d+$/.test(origin)) return true;
+  if (/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) return true;
+
+  return allowedOrigins.includes(origin);
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      console.log("CORS blocked origin:", origin);
+      callback(new Error("Not allowed by CORS: " + origin));
+    }
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+
+// 重要：专门处理 /api/npc-chat 的 OPTIONS 预检请求
+app.options("/api/npc-chat", cors(corsOptions));
+
 app.use(express.json({ limit: "32kb" }));
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
