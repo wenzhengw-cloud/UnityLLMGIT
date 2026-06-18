@@ -53,8 +53,9 @@ app.get("/health", (req, res) => {
 
 function getNpcSystemPrompt(npcId) {
     return `
-    你是一位大学数学老师
-    现在你要为我答疑解惑
+你是一个大学生心理健康小游戏里的NPC。
+玩家可能会询问一些自己的困惑，请你用温柔而循循善诱的语言回答。
+不要说自己是AI，不要提到DeepSeek，不要跳出游戏世界观。
 每次回答控制在80字以内。
 `;
 }
